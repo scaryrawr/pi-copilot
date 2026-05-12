@@ -2,7 +2,8 @@
  * On-disk cache for Copilot's `/models` response so cold starts stay snappy.
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
 import { CACHE_EXPIRY_MS, MODELS_CACHE } from "./constants.js";
 import type { CachedModels, ModelResponse } from "./types.js";
@@ -26,6 +27,7 @@ export async function loadCachedModels(): Promise<CachedModels | undefined> {
 export async function saveCachedModels(content: ModelResponse): Promise<void> {
   try {
     const entry: CachedModels = { content, cachedAt: new Date().toISOString() };
+    await mkdir(dirname(MODELS_CACHE), { recursive: true });
     await writeFile(MODELS_CACHE, JSON.stringify(entry, null, 2));
   } catch {
     // Best-effort cache; failures don't affect correctness.

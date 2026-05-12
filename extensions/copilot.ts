@@ -11,6 +11,7 @@ import { githubCopilotOAuthProvider, getGitHubCopilotBaseUrl } from "@earendil-w
 import { type ExtensionAPI, type ProviderConfig } from "@earendil-works/pi-coding-agent";
 
 import { fetchCopilotModels } from "./copilot/api.js";
+import { loadCachedModels } from "./copilot/cache.js";
 import { DEFAULT_BASE_URL } from "./copilot/constants.js";
 import { getEnterpriseDomain, loadStoredCopilotCredentials } from "./copilot/credentials.js";
 import { populateCopilotModels, toProviderModelConfigs } from "./copilot/mapping.js";
@@ -48,6 +49,12 @@ export default async function (pi: ExtensionAPI) {
 
   const state = createCopilotState(providerConfig);
 
+  // Surface a warm cache even before credentials are available. Fetching a
+  // fresh cache still requires credentials, so login / refresh remain the
+  // paths that build or update it.
+  state.setPayload((await loadCachedModels())?.content);
+  state.reproject();
+
   // Bootstrap from any previously-stored credentials so the provider has a
   // model list available before the user re-authenticates.
   const credentials = await loadStoredCopilotCredentials();
@@ -62,7 +69,7 @@ export default async function (pi: ExtensionAPI) {
   // the access token was empty), fall back to the default Copilot host so we
   // still surface the model list.
   const payload = state.getPayload();
-  if (payload && providerConfig.models?.length === 0) {
+  if (payload && !providerConfig.models?.length) {
     providerConfig.baseUrl = DEFAULT_BASE_URL;
     providerConfig.models = toProviderModelConfigs(payload, DEFAULT_BASE_URL);
   }
