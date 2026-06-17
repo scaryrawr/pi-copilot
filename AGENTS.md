@@ -31,7 +31,7 @@ Module boundaries (keep these crisp; do not cross-import sideways more than need
 - `credentials.ts` — reads `auth.json` from `getAgentDir()`, extracts the optional enterprise domain. Tolerates malformed input.
 - `api.ts` — `fetchCopilotModels()`: cache-first fetch of `/models`, returns `undefined` on any failure.
 - `inference.ts` — capability inference (api flavor, reasoning, vision, compat). Order of preference: explicit capability flags → endpoint list → id heuristics.
-- `mapping.ts` — translates Copilot API entries to pi `Model` / `ProviderModelConfig`. **Preserves any pre-existing curated fields for the same model id** (user overrides and hard-coded defaults must win over fresh inference).
+- `mapping.ts` — translates Copilot API entries to pi `Model` / `ProviderModelConfig`. The `/models` payload is authoritative for availability: Copilot models absent from the payload or disabled in the picker are dropped, while entries that are present still **preserve any pre-existing curated fields for the same model id**.
 - `state.ts` — `createCopilotState(providerConfig)`: owns the mutable `/models` payload and reprojects it onto the live `ProviderConfig` on login, token refresh, and bootstrap.
 
 Lifecycle: bootstrap loads any stored credentials and seeds the model list from cache; `login` / `refreshToken` callbacks force a refresh; `modifyModels` re-derives the list on demand whenever pi asks. Three entry points, one piece of state.
@@ -42,7 +42,7 @@ Lifecycle: bootstrap loads any stored credentials and seeds the model list from 
 - **ESM:** all relative imports use the `.js` extension (NodeNext module resolution); type-only imports use `import type` or `import { type X }` because of `verbatimModuleSyntax`.
 - **Runtime validation:** parse external payloads through the pre-compiled `ModelResponseParser`. Do not hand-roll shape checks for Copilot's API.
 - **Failure mode:** auth, network, and cache paths should swallow errors and return `undefined` rather than throw. Extension bootstrap must never break pi startup.
-- **Curated-field preservation:** when remapping Copilot entries to pi models, look up the existing model by id and prefer its `api`, `name`, `reasoning`, `input`, `cost`, `headers`, `compat`, and `thinkingLevelMap`. Only `contextWindow` / `maxTokens` are refreshed from the latest payload (with fallbacks via `positiveNumber`).
+- **Curated-field preservation:** when remapping Copilot entries to pi models, start from `enabledCopilotModels(payload)` and look up an existing model only for those returned ids. Prefer the existing model's `api`, `name`, `reasoning`, `input`, `cost`, `headers`, `compat`, and `thinkingLevelMap`; refresh only `contextWindow` / `maxTokens` from the latest payload (with fallbacks via `positiveNumber`). Never carry over Copilot models that are missing from the payload just to preserve curated fields.
 - **Copilot headers:** `COPILOT_HEADERS` mirrors the official VS Code extension. Do not change the User-Agent / Editor-Version / Copilot-Integration-Id strings without a deliberate reason — Copilot gates on these.
 - **Comments:** every module has a top-of-file docblock describing its role. Match that style for new modules; keep inline comments focused on "why", not "what".
 

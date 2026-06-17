@@ -18,6 +18,32 @@ import {
 import type { CopilotApiModel, ModelResponse } from "./types.js";
 
 /**
+ * Rebuild the Copilot model slice from the API/cache payload.
+ *
+ * The payload is authoritative for availability: existing built-in or user
+ * entries are used only as metadata sources for ids that Copilot returned and
+ * enabled for this account.
+ */
+function availableCopilotModels(
+  payload: ModelResponse,
+  baseUrl: string,
+  existingModels: Model<Api>[],
+): Model<Api>[] {
+  const apiModels = enabledCopilotModels(payload);
+  const availableIds = new Set(apiModels.map((model) => model.id));
+
+  const existingById = new Map(
+    existingModels
+      .filter((model) => model.provider === "github-copilot" && availableIds.has(model.id))
+      .map((model) => [model.id, model]),
+  );
+
+  return apiModels.map((apiModel) =>
+    toCopilotModel(apiModel, baseUrl, existingById.get(apiModel.id)),
+  );
+}
+
+/**
  * Build a pi `Model` from a Copilot API entry.
  *
  * `existing` (if provided) is a previously-known model for the same id —
@@ -75,14 +101,7 @@ export function populateCopilotModels(
 
   if (!payload) return rebased;
 
-  // Index existing copilot models so we can preserve user-curated fields.
-  const existingById = new Map(
-    rebased.filter((m) => m.provider === "github-copilot").map((m) => [m.id, m]),
-  );
-
-  const refreshed = enabledCopilotModels(payload).map((apiModel) =>
-    toCopilotModel(apiModel, baseUrl, existingById.get(apiModel.id)),
-  );
+  const refreshed = availableCopilotModels(payload, baseUrl, rebased);
 
   // Replace the copilot slice with the refreshed entries.
   return [...rebased.filter((m) => m.provider !== "github-copilot"), ...refreshed];
@@ -114,11 +133,9 @@ export function toProviderModelConfigs(
   payload: ModelResponse,
   baseUrl: string,
 ): ProviderModelConfig[] {
-  const existingById = new Map(
-    getModels("github-copilot").map((model) => [model.id, model as Model<Api>]),
-  );
-
-  return enabledCopilotModels(payload).map((apiModel) =>
-    toProviderModelConfig(toCopilotModel(apiModel, baseUrl, existingById.get(apiModel.id))),
-  );
+  return availableCopilotModels(
+    payload,
+    baseUrl,
+    getModels("github-copilot").map((model) => model as Model<Api>),
+  ).map(toProviderModelConfig);
 }
