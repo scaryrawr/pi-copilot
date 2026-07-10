@@ -34,15 +34,26 @@ export function createCopilotState(providerConfig: ProviderConfig) {
 
   /**
    * Fetch a fresh `/models` payload for the given credentials and update the
-   * provider config. Used after login and token refresh.
+   * provider config. Returns whether a new usable payload was installed.
+   * A discovery failure preserves the last known model list.
    */
-  async function refresh(credentials: OAuthCredentials, options?: { force?: boolean }) {
-    payload = await fetchCopilotModels(
+  async function refresh(
+    credentials: OAuthCredentials,
+    options?: { force?: boolean },
+  ): Promise<boolean> {
+    const next = await fetchCopilotModels(
       credentials.access,
       getEnterpriseDomain(credentials),
       options,
     );
+    if (!next) {
+      reproject(credentials);
+      return false;
+    }
+
+    payload = next;
     reproject(credentials);
+    return true;
   }
 
   /** Snapshot of the latest payload (used by `modifyModels`). */

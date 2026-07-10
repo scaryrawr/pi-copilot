@@ -5,7 +5,7 @@
 import { getGitHubCopilotBaseUrl } from "@earendil-works/pi-ai/oauth";
 
 import { loadCachedModels, saveCachedModels } from "./cache.js";
-import { COPILOT_HEADERS } from "./constants.js";
+import { COPILOT_HEADERS, MODELS_REQUEST_TIMEOUT_MS } from "./constants.js";
 import { ModelResponseParser, type ModelResponse } from "./types.js";
 
 /**
@@ -31,6 +31,7 @@ export async function fetchCopilotModels(
         Authorization: `Bearer ${accessToken}`,
         ...COPILOT_HEADERS,
       },
+      signal: AbortSignal.timeout(MODELS_REQUEST_TIMEOUT_MS),
     });
 
     if (!response.ok) return undefined;

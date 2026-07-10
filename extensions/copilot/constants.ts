@@ -9,6 +9,9 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 /** How long a cached `/models` response is considered fresh. */
 export const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+/** Maximum time model discovery may spend waiting on Copilot. */
+export const MODELS_REQUEST_TIMEOUT_MS = 5_000;
+
 /** On-disk cache of the Copilot `/models` response. */
 export const MODELS_CACHE = join(getAgentDir(), "copilot-models.json");
 

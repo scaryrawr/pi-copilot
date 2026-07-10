@@ -10,12 +10,12 @@ A single pi extension (`@earendil-works/pi-coding-agent`) that registers GitHub 
 
 Always run these from the repo root:
 
-| Task | Command |
-| --- | --- |
-| Type-check | `npm run build` (uses `tsgo`, `noEmit`) |
-| Format | `npm run fmt` (write) / `npm run fmt:check` (verify) |
-| Lint | `npm run lint` (oxlint, type-aware) / `npm run lint:fix` |
-| Tests | `npm test` (vitest; currently no tests checked in) |
+| Task       | Command                                                  |
+| ---------- | -------------------------------------------------------- |
+| Type-check | `npm run build` (uses `tsgo`, `noEmit`)                  |
+| Format     | `npm run fmt` (write) / `npm run fmt:check` (verify)     |
+| Lint       | `npm run lint` (oxlint, type-aware) / `npm run lint:fix` |
+| Tests      | `npm test` (vitest)                                      |
 
 Before declaring work done, run `npm run fmt:check && npm run lint && npm run build`. Tests should pass if any exist that cover the touched area.
 
@@ -34,7 +34,7 @@ Module boundaries (keep these crisp; do not cross-import sideways more than need
 - `mapping.ts` — translates Copilot API entries to pi `Model` / `ProviderModelConfig`. The `/models` payload is authoritative for availability: Copilot models absent from the payload or disabled in the picker are dropped, while entries that are present still **preserve any pre-existing curated fields for the same model id**.
 - `state.ts` — `createCopilotState(providerConfig)`: owns the mutable `/models` payload and reprojects it onto the live `ProviderConfig` on login, token refresh, and bootstrap.
 
-Lifecycle: bootstrap loads any stored credentials and seeds the model list from cache; `login` / `refreshToken` callbacks force a refresh; `modifyModels` re-derives the list on demand whenever pi asks. Three entry points, one piece of state.
+Lifecycle: bootstrap loads any stored credentials and seeds the model list from cache; `login` / `refreshToken` callbacks schedule a forced model refresh; `modifyModels` re-derives the list on demand whenever pi asks. Model discovery must remain asynchronous and best-effort in `refreshToken` because pi holds its cross-process auth lock until that callback returns. Three entry points, one piece of state.
 
 ## Conventions
 

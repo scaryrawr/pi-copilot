@@ -10,7 +10,6 @@
 import { githubCopilotOAuthProvider, getGitHubCopilotBaseUrl } from "@earendil-works/pi-ai/oauth";
 import { type ExtensionAPI, type ProviderConfig } from "@earendil-works/pi-coding-agent";
 
-import { fetchCopilotModels } from "./copilot/api.js";
 import { loadCachedModels } from "./copilot/cache.js";
 import { DEFAULT_BASE_URL } from "./copilot/constants.js";
 import { getEnterpriseDomain, loadStoredCopilotCredentials } from "./copilot/credentials.js";
@@ -25,13 +24,13 @@ export default async function (pi: ExtensionAPI) {
 
       async login(callbacks) {
         const next = await githubCopilotOAuthProvider.login(callbacks);
-        await state.refresh(next, { force: true });
+        scheduleModelRefresh(next);
         return next;
       },
 
       async refreshToken(currentCredentials) {
         const next = await githubCopilotOAuthProvider.refreshToken(currentCredentials);
-        await state.refresh(next, { force: true });
+        scheduleModelRefresh(next);
         return next;
       },
 
@@ -49,6 +48,22 @@ export default async function (pi: ExtensionAPI) {
 
   const state = createCopilotState(providerConfig);
 
+  // Model discovery is auxiliary to authentication. In particular, pi invokes
+  // refreshToken while holding its cross-process auth lock, so awaiting a
+  // separate `/models` request here would delay persistence of the new token
+  // and could make a healthy refresh appear hung. Re-register once discovery
+  // finishes so the live model registry receives the updated projection.
+  function scheduleModelRefresh(credentials: Parameters<typeof state.refresh>[0]): void {
+    void state
+      .refresh(credentials, { force: true })
+      .then((updated) => {
+        if (updated) pi.registerProvider("github-copilot", providerConfig);
+      })
+      .catch(() => {
+        // Model discovery is best-effort and must not affect authentication.
+      });
+  }
+
   // Surface a warm cache even before credentials are available. Fetching a
   // fresh cache still requires credentials, so login / refresh remain the
   // paths that build or update it.
@@ -59,10 +74,7 @@ export default async function (pi: ExtensionAPI) {
   // model list available before the user re-authenticates.
   const credentials = await loadStoredCopilotCredentials();
   if (credentials) {
-    state.setPayload(
-      await fetchCopilotModels(credentials.access, getEnterpriseDomain(credentials)),
-    );
-    state.reproject(credentials);
+    await state.refresh(credentials);
   }
 
   // If we have a payload but no credentials produced a usable baseUrl (e.g.
