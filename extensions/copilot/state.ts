@@ -7,12 +7,10 @@
  * in one place keeps the extension entry readable.
  */
 
-import { type OAuthCredentials } from "@earendil-works/pi-ai";
 import { getGitHubCopilotBaseUrl } from "@earendil-works/pi-ai/oauth";
 import { type ProviderConfig } from "@earendil-works/pi-coding-agent";
 
 import { fetchCopilotModels } from "./api.js";
-import { getEnterpriseDomain } from "./credentials.js";
 import { toProviderModelConfigs } from "./mapping.js";
 import type { ModelResponse } from "./types.js";
 
@@ -23,36 +21,32 @@ import type { ModelResponse } from "./types.js";
 export function createCopilotState(providerConfig: ProviderConfig) {
   let payload: ModelResponse | undefined;
 
-  /** Re-derive `providerConfig.models` from the current payload + credentials. */
-  function reproject(credentials?: OAuthCredentials): void {
+  /** Re-derive `providerConfig.models` from the current payload and API endpoint. */
+  function reproject(accessToken?: string, enterpriseDomain?: string): void {
     if (!payload) return;
-    const domain = credentials ? getEnterpriseDomain(credentials) : undefined;
-    const baseUrl = getGitHubCopilotBaseUrl(credentials?.access, domain);
+    const baseUrl = getGitHubCopilotBaseUrl(accessToken, enterpriseDomain);
     providerConfig.baseUrl = baseUrl;
     providerConfig.models = toProviderModelConfigs(payload, baseUrl);
   }
 
   /**
-   * Fetch a fresh `/models` payload for the given credentials and update the
-   * provider config. Returns whether a new usable payload was installed.
+   * Fetch a fresh `/models` payload for an already-resolved API key and update
+   * the provider config. Returns whether a new usable payload was installed.
    * A discovery failure preserves the last known model list.
    */
   async function refresh(
-    credentials: OAuthCredentials,
+    accessToken: string,
+    enterpriseDomain?: string,
     options?: { force?: boolean },
   ): Promise<boolean> {
-    const next = await fetchCopilotModels(
-      credentials.access,
-      getEnterpriseDomain(credentials),
-      options,
-    );
+    const next = await fetchCopilotModels(accessToken, enterpriseDomain, options);
     if (!next) {
-      reproject(credentials);
+      reproject(accessToken, enterpriseDomain);
       return false;
     }
 
     payload = next;
-    reproject(credentials);
+    reproject(accessToken, enterpriseDomain);
     return true;
   }
 

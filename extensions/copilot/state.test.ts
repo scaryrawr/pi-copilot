@@ -39,7 +39,9 @@ describe("createCopilotState", () => {
     state.setPayload(initialPayload);
     vi.mocked(fetchCopilotModels).mockResolvedValue(undefined);
 
-    await expect(state.refresh(credentials, { force: true })).resolves.toBe(false);
+    await expect(state.refresh(credentials.access, undefined, { force: true })).resolves.toBe(
+      false,
+    );
 
     expect(state.getPayload()).toBe(initialPayload);
     expect(providerConfig.models?.map((model) => model.id)).toEqual(["initial"]);
@@ -51,7 +53,7 @@ describe("createCopilotState", () => {
     state.setPayload(initialPayload);
     vi.mocked(fetchCopilotModels).mockResolvedValue(refreshedPayload);
 
-    await expect(state.refresh(credentials, { force: true })).resolves.toBe(true);
+    await expect(state.refresh(credentials.access, undefined, { force: true })).resolves.toBe(true);
 
     expect(state.getPayload()).toBe(refreshedPayload);
     expect(providerConfig.models?.map((model) => model.id)).toEqual(["refreshed"]);
