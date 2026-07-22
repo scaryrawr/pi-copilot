@@ -1,16 +1,16 @@
 /**
  * Mutable lifecycle around the Copilot `/models` payload.
  *
- * The OAuth callbacks (login / refreshToken / modifyModels) and the bootstrap
- * path all read and mutate the same two pieces of state: the latest payload
- * and the derived list installed on `providerConfig`. Bundling that lifecycle
- * in one place keeps the extension entry readable.
+ * Provider refreshes and the bootstrap path read and mutate the same two
+ * pieces of state: the latest payload and the derived list installed on
+ * `providerConfig`. Bundling that lifecycle in one place keeps the extension
+ * entry readable.
  */
 
-import { getGitHubCopilotBaseUrl } from "@earendil-works/pi-ai/oauth";
 import { type ProviderConfig } from "@earendil-works/pi-coding-agent";
 
 import { fetchCopilotModels } from "./api.js";
+import { getGitHubCopilotBaseUrl } from "./compat.js";
 import { toProviderModelConfigs } from "./mapping.js";
 import type { ModelResponse } from "./types.js";
 

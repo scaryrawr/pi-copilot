@@ -16,6 +16,7 @@ Always run these from the repo root:
 | Format     | `npm run fmt` (write) / `npm run fmt:check` (verify)     |
 | Lint       | `npm run lint` (oxlint, type-aware) / `npm run lint:fix` |
 | Tests      | `npm test` (vitest)                                      |
+| Smoke test | `pi --list-models github-copilot`                        |
 
 Before declaring work done, run `npm run fmt:check && npm run lint && npm run build`. Tests should pass if any exist that cover the touched area.
 
@@ -28,13 +29,14 @@ Module boundaries (keep these crisp; do not cross-import sideways more than need
 - `constants.ts` — headers, URLs, cache paths, compat flag bundles, `ZERO_COST`. Pure values, no logic.
 - `types.ts` — TypeBox schemas + derived types for the `/models` payload, credentials, and cache entry. Owns the single `ModelResponseParser` (`Compile(Models)`).
 - `cache.ts` — best-effort 24h on-disk cache of the `/models` response. All errors are swallowed.
+- `compat.ts` — bridges pi's extension-loader catalog compatibility surface and owns Copilot endpoint/domain helpers. Do not import provider subpaths: the extension loader aliases `@earendil-works/pi-ai` to its compat module.
 - `credentials.ts` — reads `auth.json` from `getAgentDir()`, extracts the optional enterprise domain. Tolerates malformed input.
 - `api.ts` — `fetchCopilotModels()`: cache-first fetch of `/models`, returns `undefined` on any failure.
 - `inference.ts` — capability inference (api flavor, reasoning, vision, compat). Order of preference: explicit capability flags → endpoint list → id heuristics.
 - `mapping.ts` — translates Copilot API entries to pi `Model` / `ProviderModelConfig`. The `/models` payload is authoritative for availability: Copilot models absent from the payload or disabled in the picker are dropped, while entries that are present still **preserve any pre-existing curated fields for the same model id**.
-- `state.ts` — `createCopilotState(providerConfig)`: owns the mutable `/models` payload and reprojects it onto the live `ProviderConfig` on login, token refresh, and bootstrap.
+- `state.ts` — `createCopilotState(providerConfig)`: owns the mutable `/models` payload and reprojects it onto the live `ProviderConfig` during provider refresh and bootstrap.
 
-Lifecycle: bootstrap loads any stored credentials and seeds the model list from cache; `login` / `refreshToken` callbacks schedule a forced model refresh; `modifyModels` re-derives the list on demand whenever pi asks. Model discovery must remain asynchronous and best-effort in `refreshToken` because pi holds its cross-process auth lock until that callback returns. Three entry points, one piece of state.
+Lifecycle: the extension inherits pi's built-in GitHub Copilot OAuth implementation. Bootstrap seeds the model list from cache; pi's `refreshModels` provider hook refreshes account-specific models after credential resolution; `session_start` remains a fallback refresh path. Keep discovery outside OAuth callbacks because pi refreshes credentials under a cross-process auth lock.
 
 ## Conventions
 

@@ -2,7 +2,7 @@
  * Coverage for the provider's authentication lifecycle wiring.
  */
 
-import type { OAuthCredentials } from "@earendil-works/pi-ai";
+import type { OAuthCredential, RefreshModelsContext } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -10,22 +10,16 @@ import copilotExtension from "./copilot.js";
 import { fetchCopilotModels } from "./copilot/api.js";
 import { loadStoredCopilotCredentials } from "./copilot/credentials.js";
 
-const { refreshedCredentials } = vi.hoisted(() => ({
-  refreshedCredentials: {
-    refresh: "github-token",
-    access: "new-copilot-token",
-    expires: Date.now() + 60_000,
-  } satisfies OAuthCredentials,
-}));
+const refreshedCredentials = {
+  type: "oauth",
+  refresh: "github-token",
+  access: "new-copilot-token",
+  expires: Date.now() + 60_000,
+} satisfies OAuthCredential;
 
-vi.mock("@earendil-works/pi-ai/oauth", () => ({
+vi.mock("./copilot/compat.js", () => ({
   getGitHubCopilotBaseUrl: () => "https://api.example.test",
-  githubCopilotOAuthProvider: {
-    name: "GitHub Copilot",
-    login: vi.fn(),
-    refreshToken: vi.fn().mockResolvedValue(refreshedCredentials),
-    getApiKey: (credentials: OAuthCredentials) => credentials.access,
-  },
+  getCuratedCopilotModels: () => [],
 }));
 
 vi.mock("./copilot/api.js", () => ({
@@ -47,15 +41,8 @@ beforeEach(() => {
   vi.mocked(loadStoredCopilotCredentials).mockResolvedValue(undefined);
 });
 
-it("does not hold token refresh open while model discovery runs", async () => {
-  let finishDiscovery: ((value: { data: [] }) => void) | undefined;
-  vi.mocked(fetchCopilotModels).mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        finishDiscovery = resolve;
-      }),
-  );
-
+it("refreshes models through pi's provider refresh lifecycle", async () => {
+  vi.mocked(fetchCopilotModels).mockResolvedValue({ data: [] });
   const registrations: ProviderConfig[] = [];
   const pi = {
     on: vi.fn(),
@@ -65,15 +52,13 @@ it("does not hold token refresh open while model discovery runs", async () => {
   } as unknown as ExtensionAPI;
 
   await copilotExtension(pi);
-  const oauth = registrations[0]?.oauth;
-  expect(oauth).toBeDefined();
+  await registrations[0]!.refreshModels!({
+    credential: refreshedCredentials,
+    allowNetwork: true,
+    force: true,
+  } as RefreshModelsContext);
 
-  await expect(oauth!.refreshToken(refreshedCredentials)).resolves.toBe(refreshedCredentials);
-  expect(finishDiscovery).toBeDefined();
-  expect(registrations).toHaveLength(1);
-
-  finishDiscovery!({ data: [] });
-  await vi.waitFor(() => expect(registrations).toHaveLength(2));
+  expect(fetchCopilotModels).toHaveBeenCalledWith("new-copilot-token", undefined, { force: true });
 });
 
 it("discovers models with the API key resolved by pi's auth storage", async () => {

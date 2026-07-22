@@ -6,8 +6,8 @@
 import { readFile } from "node:fs/promises";
 
 import { type OAuthCredentials } from "@earendil-works/pi-ai";
-import { normalizeDomain } from "@earendil-works/pi-ai/oauth";
 
+import { normalizeDomain } from "./compat.js";
 import { AUTH_FILE } from "./constants.js";
 import type { CopilotCredentials, Tokens } from "./types.js";
 

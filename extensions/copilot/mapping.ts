@@ -3,9 +3,10 @@
  * shapes, preserving any pre-existing curated fields for the same model id.
  */
 
-import { getModels, type Api, type Model } from "@earendil-works/pi-ai";
+import { type Api, type Model } from "@earendil-works/pi-ai";
 import { type ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 
+import { getCuratedCopilotModels } from "./compat.js";
 import { COPILOT_HEADERS, ZERO_COST } from "./constants.js";
 import {
   enabledCopilotModels,
@@ -136,6 +137,6 @@ export function toProviderModelConfigs(
   return availableCopilotModels(
     payload,
     baseUrl,
-    getModels("github-copilot").map((model) => model as Model<Api>),
+    getCuratedCopilotModels().map((model) => model as Model<Api>),
   ).map(toProviderModelConfig);
 }
