@@ -32,9 +32,15 @@ export type Tokens = {
 /** Capability flags Copilot publishes for each model. */
 const SupportsSchema = Type.Object({
   vision: Type.Optional(Type.Boolean()),
+  tool_calls: Type.Optional(Type.Boolean()),
   reasoning_effort: Type.Optional(Type.Array(Type.String())),
   max_thinking_budget: Type.Optional(Type.Number()),
   min_thinking_budget: Type.Optional(Type.Number()),
+});
+
+/** Organization policy attached to a model. `disabled` hides it from the account. */
+const PolicySchema = Type.Object({
+  state: Type.Optional(Type.String()),
 });
 
 /** A single entry from Copilot's `/models` response. */
@@ -42,6 +48,7 @@ const ModelSchema = Type.Object({
   id: Type.String(),
   name: Type.Optional(Type.String()),
   model_picker_enabled: Type.Optional(Type.Boolean()),
+  policy: Type.Optional(PolicySchema),
   supported_endpoints: Type.Optional(Type.Array(Type.String())),
   capabilities: Type.Optional(
     Type.Object({

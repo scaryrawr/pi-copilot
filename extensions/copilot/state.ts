@@ -10,6 +10,7 @@
 import { type ProviderConfig } from "@earendil-works/pi-coding-agent";
 
 import { fetchCopilotModels } from "./api.js";
+import { loadCuratedCopilotModels } from "./catalog.js";
 import { getGitHubCopilotBaseUrl } from "./compat.js";
 import { toProviderModelConfigs } from "./mapping.js";
 import type { ModelResponse } from "./types.js";
@@ -21,12 +22,19 @@ import type { ModelResponse } from "./types.js";
 export function createCopilotState(providerConfig: ProviderConfig) {
   let payload: ModelResponse | undefined;
 
-  /** Re-derive `providerConfig.models` from the current payload and API endpoint. */
-  function reproject(accessToken?: string, enterpriseDomain?: string): void {
-    if (!payload) return;
+  /**
+   * Re-derive `providerConfig.models` from the current payload and API endpoint.
+   * Without a payload we republish the curated catalog so the provider never
+   * ends up with an empty model list.
+   */
+  async function reproject(accessToken?: string, enterpriseDomain?: string): Promise<void> {
     const baseUrl = getGitHubCopilotBaseUrl(accessToken, enterpriseDomain);
     providerConfig.baseUrl = baseUrl;
-    providerConfig.models = toProviderModelConfigs(payload, baseUrl);
+    providerConfig.models = toProviderModelConfigs(
+      payload,
+      baseUrl,
+      await loadCuratedCopilotModels(),
+    );
   }
 
   /**
@@ -37,16 +45,16 @@ export function createCopilotState(providerConfig: ProviderConfig) {
   async function refresh(
     accessToken: string,
     enterpriseDomain?: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; signal?: AbortSignal },
   ): Promise<boolean> {
     const next = await fetchCopilotModels(accessToken, enterpriseDomain, options);
     if (!next) {
-      reproject(accessToken, enterpriseDomain);
+      await reproject(accessToken, enterpriseDomain);
       return false;
     }
 
     payload = next;
-    reproject(accessToken, enterpriseDomain);
+    await reproject(accessToken, enterpriseDomain);
     return true;
   }
 

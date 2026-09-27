@@ -23,7 +23,7 @@ export default async function (pi: ExtensionAPI) {
   async function refreshModels(
     accessToken: string,
     enterpriseDomain?: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; signal?: AbortSignal },
   ): Promise<void> {
     if (await state.refresh(accessToken, enterpriseDomain, options)) {
       pi.registerProvider("github-copilot", providerConfig);
@@ -35,10 +35,12 @@ export default async function (pi: ExtensionAPI) {
     if (credentials?.type !== "oauth") return providerConfig.models ?? [];
 
     if (context.allowNetwork) {
-      const options = context.force !== undefined ? { force: context.force } : undefined;
-      await state.refresh(credentials.access, getEnterpriseDomain(credentials), options);
+      await refreshModels(credentials.access, getEnterpriseDomain(credentials), {
+        signal: context.signal,
+        ...(context.force !== undefined ? { force: context.force } : {}),
+      });
     } else {
-      state.reproject(credentials.access, getEnterpriseDomain(credentials));
+      await state.reproject(credentials.access, getEnterpriseDomain(credentials));
     }
 
     return providerConfig.models ?? [];
@@ -47,7 +49,7 @@ export default async function (pi: ExtensionAPI) {
   // Surface a warm cache before pi starts a session. It is refreshed below
   // using pi's OAuth-aware API-key resolution path.
   state.setPayload((await loadCachedModels())?.content);
-  state.reproject();
+  await state.reproject();
 
   // Resolve the API key through pi's auth storage rather than reading the
   // access token from disk. This path refreshes and persists expired OAuth
@@ -57,10 +59,9 @@ export default async function (pi: ExtensionAPI) {
     if (!accessToken) return;
 
     const storedCredentials = await loadStoredCopilotCredentials();
-    await refreshModels(
-      accessToken,
-      storedCredentials ? getEnterpriseDomain(storedCredentials) : undefined,
-    );
+    const enterpriseDomain = storedCredentials ? getEnterpriseDomain(storedCredentials) : undefined;
+    const signal = ctx.signal;
+    await refreshModels(accessToken, enterpriseDomain, signal ? { signal } : undefined);
   });
 
   pi.registerProvider("github-copilot", providerConfig);

@@ -6,8 +6,7 @@
 import { type Api, type Model } from "@earendil-works/pi-ai";
 import { type ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 
-import { getCuratedCopilotModels } from "./compat.js";
-import { COPILOT_HEADERS, ZERO_COST } from "./constants.js";
+import { COPILOT_HEADERS, INDIVIDUAL_BASE_URL, ZERO_COST } from "./constants.js";
 import {
   enabledCopilotModels,
   inferApi,
@@ -30,7 +29,9 @@ function availableCopilotModels(
   baseUrl: string,
   existingModels: Model<Api>[],
 ): Model<Api>[] {
-  const apiModels = enabledCopilotModels(payload);
+  // Individual accounts can report every picker flag as false while still
+  // exposing enabled models, so only fall back to policy there.
+  const apiModels = enabledCopilotModels(payload, baseUrl === INDIVIDUAL_BASE_URL);
   const availableIds = new Set(apiModels.map((model) => model.id));
 
   const existingById = new Map(
@@ -77,6 +78,7 @@ export function toCopilotModel(
       : {}),
     input: existing?.input ?? inferInput(apiModel),
     cost: existing?.cost ?? ZERO_COST,
+    ...(existing?.promptCache !== undefined ? { promptCache: existing.promptCache } : {}),
     contextWindow,
     maxTokens,
     headers: existing?.headers ?? COPILOT_HEADERS,
@@ -119,6 +121,7 @@ function toProviderModelConfig(model: Model<Api>): ProviderModelConfig {
     ...(model.thinkingLevelMap !== undefined ? { thinkingLevelMap: model.thinkingLevelMap } : {}),
     input: model.input,
     cost: model.cost,
+    ...(model.promptCache !== undefined ? { promptCache: model.promptCache } : {}),
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
     ...(model.headers !== undefined ? { headers: model.headers } : {}),
@@ -129,14 +132,19 @@ function toProviderModelConfig(model: Model<Api>): ProviderModelConfig {
 /**
  * Build the full list of `ProviderModelConfig` entries to register with pi,
  * folding in any pre-existing curated entries for the same model ids.
+ *
+ * Without a usable payload we must still publish something: an empty list would
+ * wipe pi's Copilot catalog, so we republish the curated models instead.
  */
 export function toProviderModelConfigs(
-  payload: ModelResponse,
+  payload: ModelResponse | undefined,
   baseUrl: string,
+  curatedModels: readonly Model<Api>[],
 ): ProviderModelConfig[] {
-  return availableCopilotModels(
-    payload,
-    baseUrl,
-    getCuratedCopilotModels().map((model) => model as Model<Api>),
-  ).map(toProviderModelConfig);
+  const available = payload ? availableCopilotModels(payload, baseUrl, [...curatedModels]) : [];
+  const models =
+    available.length > 0
+      ? available
+      : curatedModels.map((model) => ({ ...model, baseUrl }) satisfies Model<Api>);
+  return models.map(toProviderModelConfig);
 }

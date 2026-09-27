@@ -12,9 +12,34 @@ import { type Api, type Model } from "@earendil-works/pi-ai";
 import { ANTHROPIC_COMPAT, OPENAI_COMPLETIONS_COMPAT } from "./constants.js";
 import type { CopilotApiModel, ModelResponse } from "./types.js";
 
-/** Filter the payload down to models surfaced in Copilot's picker. */
-export function enabledCopilotModels(payload: ModelResponse): CopilotApiModel[] {
-  return payload.data.filter((model) => model.model_picker_enabled === true);
+/** True when Copilot's policy explicitly disables the model for this account. */
+function policyDisabled(model: CopilotApiModel): boolean {
+  return model.policy?.state === "disabled";
+}
+
+/** True when Copilot can use the model for tool calling; unusable otherwise. */
+function toolsUsable(model: CopilotApiModel): boolean {
+  return model.capabilities?.supports?.tool_calls !== false;
+}
+
+/**
+ * Filter the payload down to models this account can actually use.
+ *
+ * Mirrors Copilot's own semantics: a model must support tool calls and appear
+ * in the picker with a policy that is not disabled. `policyFallback` enables
+ * the fallback Copilot needs for individual accounts that report every picker
+ * flag as false while still exposing explicitly enabled models.
+ */
+export function enabledCopilotModels(
+  payload: ModelResponse,
+  policyFallback = false,
+): CopilotApiModel[] {
+  const candidates = payload.data.filter((model) => toolsUsable(model));
+  const pickerModels = candidates.filter(
+    (model) => model.model_picker_enabled === true && !policyDisabled(model),
+  );
+  if (pickerModels.length > 0 || !policyFallback) return pickerModels;
+  return candidates.filter((model) => model.policy?.state === "enabled");
 }
 
 /** Return `value` when it's a finite positive number, else `fallback`. */

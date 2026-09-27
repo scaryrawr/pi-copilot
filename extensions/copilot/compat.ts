@@ -1,16 +1,11 @@
 /**
- * Compatibility adapters for pi's built-in GitHub Copilot provider.
+ * Copilot endpoint helpers.
  *
- * pi's extension loader exposes the legacy catalog through its compatibility
- * entry point, while current package typings expose only the new models API.
+ * pi's built-in Copilot OAuth derives the same endpoints; we need the same
+ * rules to call `/models` with the credentials pi resolved for us.
  */
 
-import * as piAi from "@earendil-works/pi-ai";
-import { type Api, type Model } from "@earendil-works/pi-ai";
-
-type LegacyCatalog = {
-  getModels?(provider: string): readonly Model<Api>[];
-};
+import { INDIVIDUAL_BASE_URL } from "./constants.js";
 
 /** Normalize a GitHub Enterprise URL or hostname to its hostname. */
 export function normalizeDomain(input: string): string | null {
@@ -32,10 +27,5 @@ export function getGitHubCopilotBaseUrl(accessToken?: string, enterpriseDomain?:
   const proxyHost = accessToken?.match(/proxy-ep=([^;]+)/)?.[1];
   if (proxyHost) return `https://${proxyHost.replace(/^proxy\./, "api.")}`;
   if (enterpriseDomain) return `https://copilot-api.${enterpriseDomain}`;
-  return "https://api.individual.githubcopilot.com";
-}
-
-/** Return pi's current curated Copilot catalog for metadata preservation. */
-export function getCuratedCopilotModels(): readonly Model<Api>[] {
-  return (piAi as LegacyCatalog).getModels?.("github-copilot") ?? [];
+  return INDIVIDUAL_BASE_URL;
 }

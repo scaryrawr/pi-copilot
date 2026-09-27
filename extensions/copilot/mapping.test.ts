@@ -6,6 +6,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 
+import { INDIVIDUAL_BASE_URL } from "./constants.js";
 import { populateCopilotModels, toProviderModelConfigs } from "./mapping.js";
 import type { CopilotApiModel, ModelResponse } from "./types.js";
 
@@ -41,6 +42,7 @@ function apiModel(id: string, modelPickerEnabled = true): CopilotApiModel {
         max_context_window_tokens: 1000,
         max_output_tokens: 100,
       },
+      supports: { tool_calls: true },
     },
   };
 }
@@ -55,12 +57,20 @@ describe("populateCopilotModels", () => {
       piModel("available"),
       piModel("missing-from-api"),
       piModel("disabled-in-api"),
+      piModel("policy-disabled"),
+      piModel("no-tools"),
       piModel("other-provider", "openai"),
     ];
 
+    const policyDisabled = { ...apiModel("policy-disabled"), policy: { state: "disabled" } };
+    const noTools = {
+      ...apiModel("no-tools"),
+      capabilities: { limits: {}, supports: { tool_calls: false } },
+    };
+
     const result = populateCopilotModels(
       models,
-      payload([apiModel("available"), apiModel("disabled-in-api", false)]),
+      payload([apiModel("available"), apiModel("disabled-in-api", false), policyDisabled, noTools]),
       "https://new.example.test",
     );
 
@@ -78,13 +88,47 @@ describe("populateCopilotModels", () => {
       name: "curated available",
     });
   });
+
+  it("preserves curated fields that Copilot does not report", () => {
+    const curated = piModel("claude-opus-5.5");
+    curated.thinkingLevelMap = { off: null, high: "high" };
+    curated.cost = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 };
+
+    const [model] = populateCopilotModels(
+      [curated],
+      payload([apiModel("claude-opus-5.5")]),
+      "https://new.example.test",
+    );
+
+    expect(model).toMatchObject({
+      thinkingLevelMap: { off: null, high: "high" },
+      cost: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+      contextWindow: 1000,
+      maxTokens: 100,
+    });
+  });
+
+  it("falls back to enabled policies when the individual endpoint reports no picker models", () => {
+    const enabledByPolicy = { ...apiModel("enabled-only", false), policy: { state: "enabled" } };
+
+    const fallback = populateCopilotModels([], payload([enabledByPolicy]), INDIVIDUAL_BASE_URL);
+    const strict = populateCopilotModels(
+      [],
+      payload([enabledByPolicy]),
+      "https://enterprise.example.test",
+    );
+
+    expect(fallback.map((model) => model.id)).toEqual(["enabled-only"]);
+    expect(strict).toEqual([]);
+  });
 });
 
 describe("toProviderModelConfigs", () => {
-  it("uses built-ins only as metadata for ids present in the payload", () => {
+  it("uses curated models only as metadata for ids present in the payload", () => {
     const configs = toProviderModelConfigs(
       payload([apiModel("gpt-4o")]),
       "https://new.example.test",
+      [piModel("gpt-4o"), piModel("not-in-payload")],
     );
 
     expect(configs.map((config) => config.id)).toEqual(["gpt-4o"]);

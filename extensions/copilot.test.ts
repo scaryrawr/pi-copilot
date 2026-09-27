@@ -19,7 +19,10 @@ const refreshedCredentials = {
 
 vi.mock("./copilot/compat.js", () => ({
   getGitHubCopilotBaseUrl: () => "https://api.example.test",
-  getCuratedCopilotModels: () => [],
+}));
+
+vi.mock("./copilot/catalog.js", () => ({
+  loadCuratedCopilotModels: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("./copilot/api.js", () => ({
@@ -44,6 +47,7 @@ beforeEach(() => {
 it("refreshes models through pi's provider refresh lifecycle", async () => {
   vi.mocked(fetchCopilotModels).mockResolvedValue({ data: [] });
   const registrations: ProviderConfig[] = [];
+  const signal = new AbortController().signal;
   const pi = {
     on: vi.fn(),
     registerProvider(_name: string, config: ProviderConfig) {
@@ -56,9 +60,13 @@ it("refreshes models through pi's provider refresh lifecycle", async () => {
     credential: refreshedCredentials,
     allowNetwork: true,
     force: true,
+    signal,
   } as RefreshModelsContext);
 
-  expect(fetchCopilotModels).toHaveBeenCalledWith("new-copilot-token", undefined, { force: true });
+  expect(fetchCopilotModels).toHaveBeenCalledWith("new-copilot-token", undefined, {
+    force: true,
+    signal,
+  });
 });
 
 it("discovers models with the API key resolved by pi's auth storage", async () => {
