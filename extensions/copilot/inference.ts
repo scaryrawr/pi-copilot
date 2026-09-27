@@ -35,16 +35,19 @@ export function enabledCopilotModels(
   policyFallback = false,
 ): CopilotApiModel[] {
   const candidates = payload.data.filter((model) => toolsUsable(model));
+
   const pickerModels = candidates.filter(
     (model) => model.model_picker_enabled === true && !policyDisabled(model),
   );
+
   if (pickerModels.length > 0 || !policyFallback) return pickerModels;
+
   return candidates.filter((model) => model.policy?.state === "enabled");
 }
 
 /** Return `value` when it's a finite positive number, else `fallback`. */
 export function positiveNumber(value: number | undefined, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+  return value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 /**
@@ -55,40 +58,50 @@ export function positiveNumber(value: number | undefined, fallback: number): num
  */
 function inferApiFromEndpoints(endpoints: readonly string[]): Api | undefined {
   if (endpoints.includes("/v1/messages")) return "anthropic-messages";
+
   if (endpoints.some((e) => e === "/responses" || e === "ws:/responses")) {
     return "openai-responses";
   }
+
   if (endpoints.includes("/chat/completions")) return "openai-completions";
+
   return undefined;
 }
 
 /** Fallback `Api` inference when no endpoints are declared. */
 function inferApiFromId(modelId: string): Api {
   if (modelId.startsWith("claude-")) return "anthropic-messages";
+
   if (modelId.startsWith("gpt-5") || /^o\d/.test(modelId)) return "openai-responses";
+
   return "openai-completions";
 }
 
 /** Best-effort `Api` selection for a Copilot model. */
 export function inferApi(apiModel: CopilotApiModel): Api {
   const endpoints = apiModel.supported_endpoints;
+
   if (Array.isArray(endpoints) && endpoints.length > 0) {
     const fromEndpoints = inferApiFromEndpoints(endpoints);
+
     if (fromEndpoints !== undefined) return fromEndpoints;
   }
+
   return inferApiFromId(apiModel.id);
 }
 
 /** True iff Copilot declares any `reasoning_effort` levels for the model. */
 function supportsReasoningEffort(apiModel: CopilotApiModel): boolean {
   const efforts = apiModel.capabilities?.supports?.reasoning_effort;
+
   return Array.isArray(efforts) && efforts.length > 0;
 }
 
 /** True iff Copilot declares a positive `max_thinking_budget` for the model. */
 function supportsThinkingBudget(apiModel: CopilotApiModel): boolean {
   const budget = apiModel.capabilities?.supports?.max_thinking_budget;
-  return typeof budget === "number" && budget > 0;
+
+  return budget !== undefined && budget > 0;
 }
 
 /**
@@ -100,17 +113,22 @@ function supportsThinkingBudget(apiModel: CopilotApiModel): boolean {
  */
 export function inferReasoning(apiModel: CopilotApiModel, api: Api): boolean {
   if (supportsReasoningEffort(apiModel) || supportsThinkingBudget(apiModel)) return true;
+
   if (apiModel.capabilities?.supports === undefined) {
     return api === "anthropic-messages" || api === "openai-responses";
   }
+
   return false;
 }
 
 /** Decide the input modalities the model accepts. */
 export function inferInput(apiModel: CopilotApiModel): ("text" | "image")[] {
   const vision = apiModel.capabilities?.supports?.vision;
+
   if (vision === true) return ["text", "image"];
+
   if (vision === false) return ["text"];
+
   // Unknown capability — keep the prior id-based default.
   return apiModel.id.startsWith("grok-code-") ? ["text"] : ["text", "image"];
 }
@@ -123,6 +141,8 @@ export function inferCompat(apiModel: CopilotApiModel, api: Api): Model<Api>["co
       supportsReasoningEffort: supportsReasoningEffort(apiModel),
     };
   }
+
   if (api === "anthropic-messages") return ANTHROPIC_COMPAT;
+
   return undefined;
 }

@@ -11,19 +11,31 @@ import { readFile } from "node:fs/promises";
 
 import { type Api, type Model } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 
 import { MODELS_STORE } from "./constants.js";
 
-/** Minimal shape of the `github-copilot` entry inside `models-store.json`. */
-type StoredCatalogEntry = {
-  models?: unknown;
-};
+/**
+ * Identity contract for persisted overlay entries. pi stores full `Model`
+ * records (and occasionally junk) there; the wrapper tolerates any entry
+ * value and `isModel` validates each one we actually merge.
+ */
+const StoredModelSchema = Type.Object({
+  id: Type.String(),
+  name: Type.String(),
+});
 
-/** Narrow an unknown catalog entry to a pi `Model` we can merge. */
+const CopilotStoreSchema = Type.Object({
+  "github-copilot": Type.Optional(
+    Type.Object({
+      models: Type.Optional(Type.Array(Type.Unknown())),
+    }),
+  ),
+});
+
 function isModel(value: unknown): value is Model<Api> {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as { id?: unknown; name?: unknown; api?: unknown };
-  return typeof candidate.id === "string" && typeof candidate.name === "string";
+  return Value.Check(StoredModelSchema, value);
 }
 
 /**
@@ -32,14 +44,17 @@ function isModel(value: unknown): value is Model<Api> {
  */
 async function loadStoredCatalogModels(): Promise<Model<Api>[]> {
   try {
-    const raw = await readFile(MODELS_STORE, "utf-8");
-    const stored = (JSON.parse(raw) as Record<string, unknown>)?.["github-copilot"] as
-      | StoredCatalogEntry
-      | undefined;
-    if (!Array.isArray(stored?.models)) return [];
+    const parsed: unknown = JSON.parse(await readFile(MODELS_STORE, "utf-8"));
+
+    if (!Value.Check(CopilotStoreSchema, parsed)) return [];
+
+    const models = parsed["github-copilot"]?.models ?? [];
+
     // pi persists the overlay with `provider` set; stamp it anyway so partial
     // payloads still project onto the right provider.
-    return stored.models.filter(isModel).map((model) => ({ ...model, provider: "github-copilot" }));
+    return models.flatMap((model) =>
+      isModel(model) ? [{ ...model, provider: "github-copilot" }] : [],
+    );
   } catch {
     return [];
   }
@@ -52,15 +67,19 @@ async function loadStoredCatalogModels(): Promise<Model<Api>[]> {
  */
 export async function loadCuratedCopilotModels(): Promise<Model<Api>[]> {
   let curated: Model<Api>[] = [];
+
   try {
     curated = [...getBuiltinModels("github-copilot")];
   } catch {
     curated = [];
   }
+
   for (const model of await loadStoredCatalogModels()) {
     const index = curated.findIndex((entry) => entry.id === model.id);
+
     if (index >= 0) curated[index] = model;
     else curated.push(model);
   }
+
   return curated;
 }

@@ -34,10 +34,10 @@ function availableCopilotModels(
   const apiModels = enabledCopilotModels(payload, baseUrl === INDIVIDUAL_BASE_URL);
   const availableIds = new Set(apiModels.map((model) => model.id));
 
-  const existingById = new Map(
-    existingModels
-      .filter((model) => model.provider === "github-copilot" && availableIds.has(model.id))
-      .map((model) => [model.id, model]),
+  const existingById = new Map<string, Model<Api>>(
+    existingModels.flatMap((model): [string, Model<Api>][] =>
+      model.provider === "github-copilot" && availableIds.has(model.id) ? [[model.id, model]] : [],
+    ),
   );
 
   return apiModels.map((apiModel) =>
@@ -59,31 +59,42 @@ export function toCopilotModel(
 ): Model<Api> {
   const api = existing?.api ?? inferApi(apiModel);
   const limits = apiModel.capabilities?.limits;
+
   const contextWindow = positiveNumber(
     limits?.max_context_window_tokens,
     existing?.contextWindow ?? 128000,
   );
+
   const maxTokens = positiveNumber(limits?.max_output_tokens, existing?.maxTokens ?? 16384);
   const compat = existing?.compat ?? inferCompat(apiModel, api);
 
-  return {
+  const model: Model<Api> = {
     id: apiModel.id,
     name: apiModel.name ?? existing?.name ?? apiModel.id,
     api,
     provider: "github-copilot",
     baseUrl,
     reasoning: existing?.reasoning ?? inferReasoning(apiModel, api),
-    ...(existing?.thinkingLevelMap !== undefined
-      ? { thinkingLevelMap: existing.thinkingLevelMap }
-      : {}),
     input: existing?.input ?? inferInput(apiModel),
     cost: existing?.cost ?? ZERO_COST,
-    ...(existing?.promptCache !== undefined ? { promptCache: existing.promptCache } : {}),
     contextWindow,
     maxTokens,
     headers: existing?.headers ?? COPILOT_HEADERS,
-    ...(compat !== undefined ? { compat } : {}),
   };
+
+  if (existing?.thinkingLevelMap !== undefined) {
+    model.thinkingLevelMap = existing.thinkingLevelMap;
+  }
+
+  if (existing?.promptCache !== undefined) {
+    model.promptCache = existing.promptCache;
+  }
+
+  if (compat !== undefined) {
+    model.compat = compat;
+  }
+
+  return model;
 }
 
 /**
@@ -112,21 +123,35 @@ export function populateCopilotModels(
 
 /** Project a pi `Model` into the `ProviderModelConfig` shape pi expects. */
 function toProviderModelConfig(model: Model<Api>): ProviderModelConfig {
-  return {
+  const config: ProviderModelConfig = {
     id: model.id,
     name: model.name,
     api: model.api,
     baseUrl: model.baseUrl,
     reasoning: model.reasoning,
-    ...(model.thinkingLevelMap !== undefined ? { thinkingLevelMap: model.thinkingLevelMap } : {}),
     input: model.input,
     cost: model.cost,
-    ...(model.promptCache !== undefined ? { promptCache: model.promptCache } : {}),
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
-    ...(model.headers !== undefined ? { headers: model.headers } : {}),
-    ...(model.compat !== undefined ? { compat: model.compat } : {}),
   };
+
+  if (model.thinkingLevelMap !== undefined) {
+    config.thinkingLevelMap = model.thinkingLevelMap;
+  }
+
+  if (model.promptCache !== undefined) {
+    config.promptCache = model.promptCache;
+  }
+
+  if (model.headers !== undefined) {
+    config.headers = model.headers;
+  }
+
+  if (model.compat !== undefined) {
+    config.compat = model.compat;
+  }
+
+  return config;
 }
 
 /**
@@ -142,9 +167,11 @@ export function toProviderModelConfigs(
   curatedModels: readonly Model<Api>[],
 ): ProviderModelConfig[] {
   const available = payload ? availableCopilotModels(payload, baseUrl, [...curatedModels]) : [];
+
   const models =
     available.length > 0
       ? available
       : curatedModels.map((model) => ({ ...model, baseUrl }) satisfies Model<Api>);
+
   return models.map(toProviderModelConfig);
 }

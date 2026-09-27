@@ -1,24 +1,27 @@
 /**
  * Coverage for the curated Copilot catalog sources.
+ *
+ * The persisted overlay lives under the agent directory, which is redirected
+ * to a real temporary directory; no module mocks are needed.
  */
 
-import { readFile } from "node:fs/promises";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { loadCuratedCopilotModels } from "./catalog.js";
+// Set before the extension modules compute their on-disk paths.
+process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-copilot-catalog-"));
 
-vi.mock("node:fs/promises", () => ({
-  readFile: vi.fn(),
-}));
+const { loadCuratedCopilotModels } = await import("./catalog.js");
 
-beforeEach(() => {
-  vi.mocked(readFile).mockReset();
-});
+const { MODELS_STORE } = await import("./constants.js");
 
 describe("loadCuratedCopilotModels", () => {
   it("overlays persisted catalog models on top of the built-in catalog", async () => {
-    vi.mocked(readFile).mockResolvedValue(
+    writeFileSync(
+      MODELS_STORE,
       JSON.stringify({
         "github-copilot": {
           models: [
@@ -36,14 +39,15 @@ describe("loadCuratedCopilotModels", () => {
     expect(ids).toContain("claude-opus-5.5");
     expect(models.find((model) => model.id === "claude-sonnet-5")?.name).toBe("Overridden");
     expect(models.every((model) => model.provider === "github-copilot")).toBe(true);
+    expect(ids).not.toContain("garbage");
   });
 
   it("returns the built-in catalog when the store is missing or malformed", async () => {
-    vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+    rmSync(MODELS_STORE, { force: true });
     const builtIns = await loadCuratedCopilotModels();
     expect(builtIns.length).toBeGreaterThan(0);
 
-    vi.mocked(readFile).mockResolvedValue("not json");
+    writeFileSync(MODELS_STORE, "not json");
     const sameAsBuiltIns = await loadCuratedCopilotModels();
     expect(sameAsBuiltIns.map((model) => model.id)).toEqual(builtIns.map((model) => model.id));
   });

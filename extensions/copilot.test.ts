@@ -1,14 +1,28 @@
 /**
  * Coverage for the provider's authentication lifecycle wiring.
+ *
+ * The extension's `pi` parameter is narrowed to what it actually consumes, so
+ * the stub below implements that interface directly; network access is stubbed
+ * at the global `fetch` seam and all file access runs against a real
+ * temporary agent directory instead of module mocks.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import type { OAuthCredential, RefreshModelsContext } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import type { ProviderConfig, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import { beforeEach, expect, it, vi } from "vitest";
 
-import copilotExtension from "./copilot.js";
-import { fetchCopilotModels } from "./copilot/api.js";
-import { loadStoredCopilotCredentials } from "./copilot/credentials.js";
+import type { CopilotExtensionApi, CopilotSessionContext } from "./copilot.js";
+
+// Set before the extension modules compute their on-disk paths.
+process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-copilot-entry-"));
+
+const { default: copilotExtension } = await import("./copilot.js");
+
+const { MODELS_CACHE } = await import("./copilot/constants.js");
 
 const refreshedCredentials = {
   type: "oauth",
@@ -17,85 +31,127 @@ const refreshedCredentials = {
   expires: Date.now() + 60_000,
 } satisfies OAuthCredential;
 
-vi.mock("./copilot/compat.js", () => ({
-  getGitHubCopilotBaseUrl: () => "https://api.example.test",
-}));
+interface PiStub {
+  readonly registrations: ProviderConfig[];
+  readonly pi: CopilotExtensionApi;
+  readonly sessionStartHandler: (ctx: CopilotSessionContext) => Promise<void>;
+}
 
-vi.mock("./copilot/catalog.js", () => ({
-  loadCuratedCopilotModels: vi.fn().mockResolvedValue([]),
-}));
+function createPiStub(): PiStub {
+  const registrations: ProviderConfig[] = [];
 
-vi.mock("./copilot/api.js", () => ({
-  fetchCopilotModels: vi.fn(),
-}));
+  const sessionStartHandlers: Array<
+    (event: SessionStartEvent, ctx: CopilotSessionContext) => Promise<void>
+  > = [];
 
-vi.mock("./copilot/cache.js", () => ({
-  loadCachedModels: vi.fn().mockResolvedValue(undefined),
-}));
+  const pi: CopilotExtensionApi = {
+    on(_event, handler) {
+      sessionStartHandlers.push(handler);
 
-vi.mock("./copilot/credentials.js", () => ({
-  getEnterpriseDomain: vi.fn().mockReturnValue(undefined),
-  loadStoredCopilotCredentials: vi.fn().mockResolvedValue(undefined),
-}));
+      return () => {};
+    },
+    registerProvider(_name, config) {
+      registrations.push(config);
+    },
+  };
+
+  const sessionStartHandler = async (ctx: CopilotSessionContext): Promise<void> => {
+    const handler = sessionStartHandlers[0];
+
+    if (handler === undefined) throw new Error("no session_start handler registered");
+
+    await handler({ type: "session_start", reason: "startup" }, ctx);
+  };
+
+  return { registrations, pi, sessionStartHandler };
+}
 
 beforeEach(() => {
-  vi.mocked(fetchCopilotModels).mockReset();
-  vi.mocked(loadStoredCopilotCredentials).mockReset();
-  vi.mocked(loadStoredCopilotCredentials).mockResolvedValue(undefined);
+  vi.unstubAllGlobals();
+  // Each test starts from an empty on-disk cache.
+  rmSync(MODELS_CACHE, { force: true });
 });
 
 it("refreshes models through pi's provider refresh lifecycle", async () => {
-  vi.mocked(fetchCopilotModels).mockResolvedValue({ data: [] });
-  const registrations: ProviderConfig[] = [];
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [] })));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { registrations, pi } = createPiStub();
   const signal = new AbortController().signal;
-  const pi = {
-    on: vi.fn(),
-    registerProvider(_name: string, config: ProviderConfig) {
-      registrations.push(config);
-    },
-  } as unknown as ExtensionAPI;
 
   await copilotExtension(pi);
-  await registrations[0]!.refreshModels!({
+
+  await registrations[0]?.refreshModels?.({
     credential: refreshedCredentials,
+    publish: async () => true,
     allowNetwork: true,
     force: true,
     signal,
-  } as RefreshModelsContext);
+  } satisfies RefreshModelsContext);
 
-  expect(fetchCopilotModels).toHaveBeenCalledWith("new-copilot-token", undefined, {
-    force: true,
-    signal,
-  });
+  expect(fetchMock).toHaveBeenCalledWith(
+    "https://api.individual.githubcopilot.com/models",
+    expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: "Bearer new-copilot-token" }),
+    }),
+  );
 });
 
 it("discovers models with the API key resolved by pi's auth storage", async () => {
-  type SessionContext = {
-    modelRegistry: {
-      getApiKeyForProvider(provider: string): Promise<string | undefined>;
-    };
-  };
-  const sessionHandlers: Array<(event: unknown, ctx: SessionContext) => Promise<void>> = [];
-  const registrations: ProviderConfig[] = [];
-  const getApiKeyForProvider = vi.fn().mockResolvedValue("refreshed-copilot-token");
-  vi.mocked(fetchCopilotModels).mockResolvedValue({
-    data: [{ id: "discovered-model", model_picker_enabled: true }],
-  });
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(
+      new Response(
+        JSON.stringify({ data: [{ id: "discovered-model", model_picker_enabled: true }] }),
+      ),
+    );
 
-  const pi = {
-    on(event: string, handler: (event: unknown, ctx: SessionContext) => Promise<void>) {
-      if (event === "session_start") sessionHandlers.push(handler);
-    },
-    registerProvider(_name: string, config: ProviderConfig) {
-      registrations.push(config);
-    },
-  } as unknown as ExtensionAPI;
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { pi, registrations, sessionStartHandler } = createPiStub();
 
   await copilotExtension(pi);
-  await sessionHandlers[0]?.({}, { modelRegistry: { getApiKeyForProvider } });
 
-  expect(getApiKeyForProvider).toHaveBeenCalledWith("github-copilot");
-  expect(fetchCopilotModels).toHaveBeenCalledWith("refreshed-copilot-token", undefined, undefined);
+  const ctx: CopilotSessionContext = {
+    modelRegistry: { getApiKeyForProvider: async () => "refreshed-copilot-token" },
+    signal: undefined,
+  };
+
+  await sessionStartHandler(ctx);
+
+  expect(fetchMock).toHaveBeenCalledWith(
+    "https://api.individual.githubcopilot.com/models",
+    expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: "Bearer refreshed-copilot-token" }),
+    }),
+  );
   expect(registrations).toHaveLength(2);
   expect(registrations[1]?.models?.map((model) => model.id)).toEqual(["discovered-model"]);
+});
+
+it("serves a warm cache from disk before pi starts a session", async () => {
+  writeFileSync(
+    MODELS_CACHE,
+    JSON.stringify({
+      content: { data: [{ id: "cached-model", model_picker_enabled: true }] },
+      cachedAt: new Date().toISOString(),
+    }),
+  );
+
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { pi, registrations, sessionStartHandler } = createPiStub();
+
+  await copilotExtension(pi);
+
+  const ctx: CopilotSessionContext = {
+    modelRegistry: { getApiKeyForProvider: async () => "refreshed-copilot-token" },
+    signal: undefined,
+  };
+
+  await sessionStartHandler(ctx);
+
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(registrations.at(-1)?.models?.map((model) => model.id)).toContain("cached-model");
 });

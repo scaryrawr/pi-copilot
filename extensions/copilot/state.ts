@@ -48,13 +48,16 @@ export function createCopilotState(providerConfig: ProviderConfig) {
     options?: { force?: boolean; signal?: AbortSignal },
   ): Promise<boolean> {
     const next = await fetchCopilotModels(accessToken, enterpriseDomain, options);
+
     if (!next) {
       await reproject(accessToken, enterpriseDomain);
+
       return false;
     }
 
     payload = next;
     await reproject(accessToken, enterpriseDomain);
+
     return true;
   }
 

@@ -10,6 +10,7 @@ import { INDIVIDUAL_BASE_URL } from "./constants.js";
 /** Normalize a GitHub Enterprise URL or hostname to its hostname. */
 export function normalizeDomain(input: string): string | null {
   const trimmed = input.trim();
+
   if (!trimmed) return null;
 
   try {
@@ -25,7 +26,10 @@ export function normalizeDomain(input: string): string | null {
  */
 export function getGitHubCopilotBaseUrl(accessToken?: string, enterpriseDomain?: string): string {
   const proxyHost = accessToken?.match(/proxy-ep=([^;]+)/)?.[1];
+
   if (proxyHost) return `https://${proxyHost.replace(/^proxy\./, "api.")}`;
+
   if (enterpriseDomain) return `https://copilot-api.${enterpriseDomain}`;
+
   return INDIVIDUAL_BASE_URL;
 }

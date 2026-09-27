@@ -63,6 +63,7 @@ describe("populateCopilotModels", () => {
     ];
 
     const policyDisabled = { ...apiModel("policy-disabled"), policy: { state: "disabled" } };
+
     const noTools = {
       ...apiModel("no-tools"),
       capabilities: { limits: {}, supports: { tool_calls: false } },
@@ -112,6 +113,7 @@ describe("populateCopilotModels", () => {
     const enabledByPolicy = { ...apiModel("enabled-only", false), policy: { state: "enabled" } };
 
     const fallback = populateCopilotModels([], payload([enabledByPolicy]), INDIVIDUAL_BASE_URL);
+
     const strict = populateCopilotModels(
       [],
       payload([enabledByPolicy]),

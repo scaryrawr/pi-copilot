@@ -1,17 +1,22 @@
 /**
  * Coverage for bounded, best-effort Copilot model discovery.
+ *
+ * The cache runs against a real temporary agent directory and network access
+ * is stubbed at the global `fetch` seam instead of mocking sibling modules.
  */
+
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchCopilotModels } from "./api.js";
-import { loadCachedModels, saveCachedModels } from "./cache.js";
-import { COPILOT_API_VERSION } from "./constants.js";
+// Set before the extension modules compute their on-disk paths.
+process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-copilot-api-"));
 
-vi.mock("./cache.js", () => ({
-  loadCachedModels: vi.fn(),
-  saveCachedModels: vi.fn(),
-}));
+const { fetchCopilotModels } = await import("./api.js");
+
+const { COPILOT_API_VERSION } = await import("./constants.js");
 
 function okResponse() {
   return new Response(JSON.stringify({ data: [] }), {
@@ -22,8 +27,6 @@ function okResponse() {
 
 describe("fetchCopilotModels", () => {
   beforeEach(() => {
-    vi.mocked(loadCachedModels).mockReset();
-    vi.mocked(saveCachedModels).mockReset();
     vi.unstubAllGlobals();
   });
 
@@ -48,11 +51,29 @@ describe("fetchCopilotModels", () => {
     );
   });
 
+  it("persists a successful payload to the on-disk cache", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCopilotModels("token", undefined, { force: true })).resolves.toEqual({
+      data: [],
+    });
+
+    // The cache written above is what the next non-forced call serves,
+    // without touching the network again.
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await expect(fetchCopilotModels("token")).resolves.toEqual({ data: [] });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("retries rate-limited responses", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
       .mockResolvedValueOnce(okResponse());
+
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchCopilotModels("token", undefined, { force: true })).resolves.toEqual({
@@ -66,6 +87,7 @@ describe("fetchCopilotModels", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchCopilotModels("token", undefined, { force: true })).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it("stops fetching when the caller aborts", async () => {

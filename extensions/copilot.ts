@@ -7,13 +7,32 @@
  * those modules into a `ProviderConfig` and registers it.
  */
 
-import { type ExtensionAPI, type ProviderConfig } from "@earendil-works/pi-coding-agent";
+import type { ProviderConfig, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 
 import { loadCachedModels } from "./copilot/cache.js";
 import { getEnterpriseDomain, loadStoredCopilotCredentials } from "./copilot/credentials.js";
 import { createCopilotState } from "./copilot/state.js";
 
-export default async function (pi: ExtensionAPI) {
+/** The subset of pi's extension context used by the `session_start` handler. */
+export interface CopilotSessionContext {
+  modelRegistry: { getApiKeyForProvider(provider: string): Promise<string | undefined> };
+  signal: AbortSignal | undefined;
+}
+
+/**
+ * The slice of pi's extension API this extension actually consumes.
+ * Declaring only what we use keeps the surface small and testable; pi's
+ * full `ExtensionAPI` remains structurally assignable to it.
+ */
+export interface CopilotExtensionApi {
+  on(
+    event: "session_start",
+    handler: (event: SessionStartEvent, ctx: CopilotSessionContext) => Promise<void>,
+  ): () => void;
+  registerProvider(name: string, config: ProviderConfig): void;
+}
+
+export default async function (pi: CopilotExtensionApi) {
   const providerConfig: ProviderConfig = {
     name: "GitHub Copilot",
   };
@@ -32,12 +51,13 @@ export default async function (pi: ExtensionAPI) {
 
   providerConfig.refreshModels = async (context) => {
     const credentials = context.credential;
+
     if (credentials?.type !== "oauth") return providerConfig.models ?? [];
 
     if (context.allowNetwork) {
       await refreshModels(credentials.access, getEnterpriseDomain(credentials), {
         signal: context.signal,
-        ...(context.force !== undefined ? { force: context.force } : {}),
+        force: context.force === true,
       });
     } else {
       await state.reproject(credentials.access, getEnterpriseDomain(credentials));
@@ -51,11 +71,9 @@ export default async function (pi: ExtensionAPI) {
   state.setPayload((await loadCachedModels())?.content);
   await state.reproject();
 
-  // Resolve the API key through pi's auth storage rather than reading the
-  // access token from disk. This path refreshes and persists expired OAuth
-  // credentials under pi's cross-process lock before model discovery.
   pi.on("session_start", async (_event, ctx) => {
     const accessToken = await ctx.modelRegistry.getApiKeyForProvider("github-copilot");
+
     if (!accessToken) return;
 
     const storedCredentials = await loadStoredCopilotCredentials();

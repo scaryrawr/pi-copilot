@@ -1,26 +1,27 @@
 /**
  * Coverage for validation and expiration of the model cache.
+ *
+ * Tests run against a real temporary agent directory; the cache module's
+ * file paths derive from `PI_CODING_AGENT_DIR`, so no module mocks are needed.
  */
 
-import { readFile } from "node:fs/promises";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { loadCachedModels } from "./cache.js";
+// Set before the extension modules compute their on-disk paths.
+process.env.PI_CODING_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-copilot-cache-"));
 
-vi.mock("node:fs/promises", () => ({
-  mkdir: vi.fn(),
-  readFile: vi.fn(),
-  writeFile: vi.fn(),
-}));
+const { loadCachedModels } = await import("./cache.js");
+
+const { MODELS_CACHE } = await import("./constants.js");
 
 describe("loadCachedModels", () => {
-  beforeEach(() => {
-    vi.mocked(readFile).mockReset();
-  });
-
   it("rejects expired cache entries", async () => {
-    vi.mocked(readFile).mockResolvedValue(
+    writeFileSync(
+      MODELS_CACHE,
       JSON.stringify({
         content: { data: [{ id: "cached-model" }] },
         cachedAt: "2000-01-01T00:00:00.000Z",
@@ -31,10 +32,28 @@ describe("loadCachedModels", () => {
   });
 
   it("rejects cache entries with an invalid timestamp", async () => {
-    vi.mocked(readFile).mockResolvedValue(
-      JSON.stringify({ content: { data: [] }, cachedAt: "not-a-date" }),
-    );
+    writeFileSync(MODELS_CACHE, JSON.stringify({ content: { data: [] }, cachedAt: "not-a-date" }));
 
     await expect(loadCachedModels()).resolves.toBeUndefined();
+  });
+
+  it("rejects malformed cache files", async () => {
+    writeFileSync(MODELS_CACHE, "not json");
+
+    await expect(loadCachedModels()).resolves.toBeUndefined();
+  });
+
+  it("returns a fresh, valid cache entry", async () => {
+    writeFileSync(
+      MODELS_CACHE,
+      JSON.stringify({
+        content: { data: [{ id: "fresh-model" }] },
+        cachedAt: new Date().toISOString(),
+      }),
+    );
+
+    const cached = await loadCachedModels();
+
+    expect(cached?.content.data.map((model) => model.id)).toEqual(["fresh-model"]);
   });
 });

@@ -3,27 +3,8 @@
  * and cache types used throughout the extension.
  */
 
-import { Type, type OAuthCredentials } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { Compile } from "typebox/compile";
-
-// ---------------------------------------------------------------------------
-// Credentials
-// ---------------------------------------------------------------------------
-
-/** Copilot credentials augmented with an optional enterprise host. */
-export type CopilotCredentials = OAuthCredentials & {
-  enterpriseUrl?: string;
-};
-
-/** Loosely-typed shape we tolerate when reading `auth.json` from disk. */
-export type StoredCopilotCredentials = Partial<CopilotCredentials> & {
-  type?: string;
-};
-
-/** Top-level shape of `auth.json` that we care about. */
-export type Tokens = {
-  "github-copilot"?: StoredCopilotCredentials;
-};
 
 // ---------------------------------------------------------------------------
 // `/models` payload
@@ -70,6 +51,7 @@ export const Models = Type.Object({
 });
 
 export type ModelResponse = Type.Static<typeof Models>;
+
 export type CopilotApiModel = ModelResponse["data"][number];
 
 /** Pre-compiled validator for the `/models` payload. */

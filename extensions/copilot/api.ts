@@ -20,10 +20,12 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
       clearTimeout(timer);
       reject(signal.reason);
     };
+
     const timer = setTimeout(() => {
       signal.removeEventListener("abort", onAbort);
       resolve();
     }, ms);
+
     signal.addEventListener("abort", onAbort, { once: true });
   });
 }
@@ -50,17 +52,22 @@ async function fetchWithRateLimitRetry(
       headers,
       signal: AbortSignal.any([signal, AbortSignal.timeout(MODELS_REQUEST_TIMEOUT_MS)]),
     });
+
     if (response.status !== 429 || attempt === MODELS_MAX_RETRIES || signal.aborted)
       return response;
 
     let delayMs = 500 * 2 ** attempt;
     const retryAfter = response.headers.get("retry-after");
+
     if (retryAfter !== null) {
       const seconds = Number.parseFloat(retryAfter);
       delayMs = Number.isNaN(seconds) ? Date.parse(retryAfter) - Date.now() : seconds * 1000;
+
       if (!Number.isFinite(delayMs)) return response;
     }
+
     delayMs = Math.max(0, delayMs);
+
     if (delayMs >= deadline - Date.now()) return response;
 
     await response.body?.cancel();
@@ -81,11 +88,13 @@ export async function fetchCopilotModels(
 ): Promise<ModelResponse | undefined> {
   if (!options?.force) {
     const cached = await loadCachedModels();
+
     if (cached) return cached.content;
   }
 
   try {
     const baseUrl = getGitHubCopilotBaseUrl(accessToken, enterpriseDomain);
+
     const response = await fetchWithRateLimitRetry(
       `${baseUrl}/models`,
       {
@@ -101,6 +110,7 @@ export async function fetchCopilotModels(
 
     const payload = ModelResponseParser.Decode(await response.json());
     await saveCachedModels(payload);
+
     return payload;
   } catch {
     return undefined;

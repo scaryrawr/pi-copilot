@@ -5,8 +5,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import { Value } from "typebox/value";
+
 import { CACHE_EXPIRY_MS, MODELS_CACHE } from "./constants.js";
-import type { CachedModels, ModelResponse } from "./types.js";
+import { ModelsCached, type CachedModels, type ModelResponse } from "./types.js";
 
 /**
  * Load the cached `/models` payload if present and not yet expired.
@@ -14,10 +16,13 @@ import type { CachedModels, ModelResponse } from "./types.js";
  */
 export async function loadCachedModels(): Promise<CachedModels | undefined> {
   try {
-    const raw = await readFile(MODELS_CACHE, "utf-8");
-    const cached: CachedModels = JSON.parse(raw);
-    const age = Date.now() - new Date(cached.cachedAt).getTime();
-    return age < CACHE_EXPIRY_MS ? cached : undefined;
+    const parsed: unknown = JSON.parse(await readFile(MODELS_CACHE, "utf-8"));
+
+    if (!Value.Check(ModelsCached, parsed)) return undefined;
+
+    const age = Date.now() - new Date(parsed.cachedAt).getTime();
+
+    return age < CACHE_EXPIRY_MS ? parsed : undefined;
   } catch {
     return undefined;
   }

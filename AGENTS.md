@@ -29,7 +29,7 @@ Entry point: `extensions/copilot.ts`. It composes everything in `extensions/copi
 Module boundaries (keep these crisp; do not cross-import sideways more than needed):
 
 - `constants.ts` — headers, URLs, cache paths, compat flag bundles, `ZERO_COST`. Pure values, no logic.
-- `types.ts` — TypeBox schemas + derived types for the `/models` payload, credentials, and cache entry. Owns the single `ModelResponseParser` (`Compile(Models)`).
+- `types.ts` — TypeBox schemas + derived types for the `/models` payload and cache entry. Owns the single `ModelResponseParser` (`Compile(Models)`).
 - `cache.ts` — best-effort 24h on-disk cache of the `/models` response. All errors are swallowed.
 - `compat.ts` — Copilot endpoint/domain helpers (proxy-token → API base URL, enterprise domain normalization). Keep this free of catalog/auth concerns; `catalog.ts` and `credentials.ts` own those.
 - `catalog.ts` — reads pi's curated Copilot catalog: built-in models via `@earendil-works/pi-ai/providers/all` plus the dynamic overlay pi persists in `models-store.json` (overlay wins). Best-effort; failures yield fewer models.
@@ -43,9 +43,10 @@ Lifecycle: the extension inherits pi's built-in GitHub Copilot OAuth implementat
 
 ## Conventions
 
-- **TypeScript:** strict mode with `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, and `verbatimModuleSyntax`. When forwarding an optional field, use a conditional spread (`...(x !== undefined ? { x } : {})`) — assigning `undefined` is a type error. See `toCopilotModel` for the established pattern.
+- **TypeScript:** strict mode with `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, and `verbatimModuleSyntax`. When forwarding an optional field, build the object with the required fields first and assign the optional field behind an `!== undefined` guard; do **not** use conditional empty-object spreads (`...(x !== undefined ? { x } : {})`) — the vendored anti-slop oxlint plugin rejects them. See `toCopilotModel` for the established pattern.
 - **ESM:** all relative imports use the `.js` extension (NodeNext module resolution); type-only imports use `import type` or `import { type X }` because of `verbatimModuleSyntax`.
-- **Runtime validation:** parse external payloads through the pre-compiled `ModelResponseParser`. Do not hand-roll shape checks for Copilot's API.
+- **Runtime validation:** parse external payloads through the pre-compiled `ModelResponseParser` and validate other external input (auth file, models store, cache) with `Value.Check` against TypeBox schemas in the owning module. Do not hand-roll `typeof`/`as` shape checks.
+- **Tests:** no module mocking — `vi.mock` is rejected by the vendored anti-slop plugin. Redirect the agent directory with `PI_CODING_AGENT_DIR` (set it before dynamically importing the modules under test) and stub network at the global `fetch` seam with `vi.stubGlobal("fetch", ...)`.
 - **Failure mode:** auth, network, and cache paths should swallow errors and return `undefined` rather than throw. Extension bootstrap must never break pi startup.
 - **Curated-field preservation:** when remapping Copilot entries to pi models, start from `enabledCopilotModels(payload)` and look up an existing model only for those returned ids. Prefer the existing model's `api`, `name`, `reasoning`, `input`, `cost`, `promptCache`, `headers`, `compat`, and `thinkingLevelMap`; refresh only `contextWindow` / `maxTokens` from the latest payload (with fallbacks via `positiveNumber`). Never carry over Copilot models that are missing from the payload just to preserve curated fields.
 - **Copilot headers:** `COPILOT_HEADERS` mirrors the official VS Code extension and `COPILOT_API_VERSION` matches what pi's built-in Copilot client sends. Do not change the User-Agent / Editor-Version / Copilot-Integration-Id / X-GitHub-Api-Version strings without a deliberate reason — Copilot gates on these.
