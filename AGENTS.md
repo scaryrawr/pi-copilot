@@ -15,10 +15,12 @@ Always run these from the repo root:
 | Type-check | `npm run build` (uses `tsgo`, `noEmit`)                  |
 | Format     | `npm run fmt` (write) / `npm run fmt:check` (verify)     |
 | Lint       | `npm run lint` (oxlint, type-aware) / `npm run lint:fix` |
-| Tests      | `npm test` (vitest)                                      |
+| Tests      | `npm test -- --run` (plain `npm test` starts watch mode) |
 | Smoke test | `pi --list-models github-copilot`                        |
 
 Before declaring work done, run `npm run fmt:check && npm run lint && npm run build`. Tests should pass if any exist that cover the touched area.
+
+When upgrading tooling, `oxlint` declares an optional `oxlint-tsgolint` peer (currently `>=7.0.2001`, versioned independently of `oxlint` itself). Bump the two together and reinstall; a version outside that range fails `npm install` with `ERESOLVE` and breaks the type-aware `npm run lint`. Check the peer range in `node_modules/oxlint/package.json` instead of guessing from the oxlint version.
 
 ## Architecture
 
