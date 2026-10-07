@@ -155,3 +155,52 @@ it("serves a warm cache from disk before pi starts a session", async () => {
   expect(fetchMock).not.toHaveBeenCalled();
   expect(registrations.at(-1)?.models?.map((model) => model.id)).toContain("cached-model");
 });
+
+it("never publishes an empty model list to pi", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [] }))));
+
+  const { registrations, pi } = createPiStub();
+
+  await copilotExtension(pi);
+
+  // No OAuth credential: the hook must fall back to the curated projection.
+  const models = await registrations[0]?.refreshModels?.({
+    publish: async () => true,
+    allowNetwork: true,
+    force: true,
+    signal: new AbortController().signal,
+  } satisfies RefreshModelsContext);
+
+  expect(models).toBeDefined();
+  expect(models?.length).toBeGreaterThan(0);
+});
+
+it("does not re-register the provider from inside refreshModels", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: [{ id: "fresh", model_picker_enabled: true }] })),
+      ),
+  );
+
+  const { registrations, pi } = createPiStub();
+
+  await copilotExtension(pi);
+
+  const registrationsBefore = registrations.length;
+
+  await registrations[0]?.refreshModels?.({
+    credential: refreshedCredentials,
+    publish: async () => true,
+    allowNetwork: true,
+    force: true,
+    signal: new AbortController().signal,
+  } satisfies RefreshModelsContext);
+
+  // Re-registering mid-refresh bumps pi's publication generation and drops the
+  // models pi is about to publish, so the hook must only return the list.
+  expect(registrations).toHaveLength(registrationsBefore);
+  expect(registrations[0]?.models?.map((model) => model.id)).toContain("fresh");
+});

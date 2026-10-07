@@ -11,7 +11,9 @@ import {
   enabledCopilotModels,
   inferApi,
   inferCompat,
+  inferCost,
   inferInput,
+  inferInputLimits,
   inferReasoning,
   positiveNumber,
 } from "./inference.js";
@@ -67,6 +69,7 @@ export function toCopilotModel(
 
   const maxTokens = positiveNumber(limits?.max_output_tokens, existing?.maxTokens ?? 16384);
   const compat = existing?.compat ?? inferCompat(apiModel, api);
+  const input = existing?.input ?? inferInput(apiModel);
 
   const model: Model<Api> = {
     id: apiModel.id,
@@ -75,8 +78,10 @@ export function toCopilotModel(
     provider: "github-copilot",
     baseUrl,
     reasoning: existing?.reasoning ?? inferReasoning(apiModel, api),
-    input: existing?.input ?? inferInput(apiModel),
-    cost: existing?.cost ?? ZERO_COST,
+    input,
+    // Copilot publishes real per-token prices once an account is on usage-based
+    // billing; curated costs win, and zero cost is the premium-request default.
+    cost: existing?.cost ?? inferCost(apiModel) ?? ZERO_COST,
     contextWindow,
     maxTokens,
     headers: existing?.headers ?? COPILOT_HEADERS,
@@ -88,6 +93,16 @@ export function toCopilotModel(
 
   if (existing?.promptCache !== undefined) {
     model.promptCache = existing.promptCache;
+  }
+
+  if (existing?.samplingParams !== undefined) {
+    model.samplingParams = existing.samplingParams;
+  }
+
+  const inputLimits = existing?.inputLimits ?? inferInputLimits(apiModel, input);
+
+  if (inputLimits !== undefined) {
+    model.inputLimits = inputLimits;
   }
 
   if (compat !== undefined) {
@@ -141,6 +156,14 @@ function toProviderModelConfig(model: Model<Api>): ProviderModelConfig {
 
   if (model.promptCache !== undefined) {
     config.promptCache = model.promptCache;
+  }
+
+  if (model.inputLimits !== undefined) {
+    config.inputLimits = model.inputLimits;
+  }
+
+  if (model.samplingParams !== undefined) {
+    config.samplingParams = model.samplingParams;
   }
 
   if (model.headers !== undefined) {

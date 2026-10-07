@@ -35,11 +35,16 @@ Module boundaries (keep these crisp; do not cross-import sideways more than need
 - `catalog.ts` — reads pi's curated Copilot catalog: built-in models via `@earendil-works/pi-ai/providers/all` plus the dynamic overlay pi persists in `models-store.json` (overlay wins). Best-effort; failures yield fewer models.
 - `credentials.ts` — reads `auth.json` from `getAgentDir()`, extracts the optional enterprise domain. Tolerates malformed input.
 - `api.ts` — `fetchCopilotModels()`: cache-first fetch of `/models` with Copilot's required headers, bounded retries on HTTP 429, and caller-signal cancellation. Returns `undefined` on any failure.
-- `inference.ts` — capability inference (api flavor, reasoning, vision, compat) plus `enabledCopilotModels(payload, policyFallback)`, which mirrors Copilot's own availability rules (tool-call support, picker enabled, policy not `disabled`, policy `enabled` fallback). Order of preference: explicit capability flags → endpoint list → id heuristics.
+- `inference.ts` — capability inference (api flavor, reasoning, vision, cost, image input limits, compat) plus `enabledCopilotModels(payload, policyFallback)`, which mirrors Copilot's own availability rules (tool-call support, picker enabled, policy not `disabled`, policy `enabled` fallback). Order of preference: explicit capability flags → endpoint list → id heuristics. `inferCost` converts `billing.token_prices.default` (cents per million tokens) to pi's per-million `cost`; `inferInputLimits` maps `capabilities.limits.vision` onto `inputLimits.images`.
 - `mapping.ts` — translates Copilot API entries to pi `Model` / `ProviderModelConfig`. The `/models` payload is authoritative for availability: Copilot models absent from the payload, disabled in the picker, disabled by policy, or missing tool-call support are dropped, while entries that are present still **preserve any pre-existing curated fields for the same model id** (supplied by the caller, normally `loadCuratedCopilotModels()`).
 - `state.ts` — `createCopilotState(providerConfig)`: owns the mutable `/models` payload and reprojects it onto the live `ProviderConfig` during provider refresh and bootstrap.
 
 Lifecycle: the extension inherits pi's built-in GitHub Copilot OAuth implementation. Bootstrap seeds the model list from cache; pi's `refreshModels` provider hook refreshes account-specific models after credential resolution; `session_start` remains a fallback refresh path. Keep discovery outside OAuth callbacks because pi refreshes credentials under a cross-process auth lock.
+
+Two refresh rules that are easy to break (pi 0.99.x model runtime):
+
+- `ProviderConfig.refreshModels` **must never return `[]`**. pi publishes the returned list as the provider's whole catalog, so an empty result deletes every Copilot model until the next refresh. Re-project (curated fallback) and return that instead. The same applies to the non-OAuth (API-key) branch.
+- Do **not** call `pi.registerProvider` from inside `refreshModels`. Re-registration bumps pi's generation-checked publication, so the in-flight `context.publish()` is rejected and the refreshed list is dropped; it also queues a nested refresh. Return the list and let pi publish it. Register outside a refresh (bootstrap, `session_start`).
 
 ## Conventions
 
@@ -60,6 +65,8 @@ Lifecycle: the extension inherits pi's built-in GitHub Copilot OAuth implementat
 4. If the capability requires new compat flags, add them to `constants.ts` and pick them up in `inferCompat`.
 
 Mirroring upstream pi: Copilot authentication, login, and model-policy enabling live in pi's built-in `github-copilot` provider (`packages/ai`). When upstream changes how it calls `/models` (headers, payload fields, availability rules), update the matching constant/schema/helper here in the same change — this repo duplicates only the request and projection, never the OAuth flow.
+
+pi is pinned to the newest **published** version (`^0.99.1`). Upstream git is ahead (`v1.0.x` exist as tags but are not on npm yet), so pointing `package.json` at upstream git breaks `npm install`. Keep dev pins on npm versions and mirror upstream _source_ changes instead. Known upstream-only catalog/compat data we cannot take yet: Copilot `max` thinking levels, `supportsMidConvoEffort`/`supportsMidConvoSystemMessages` for Copilot Claude, Copilot `gpt-6.1-sol`, and per-thinking-level sampling — pi's built-in provider owns those.
 
 ## Safety / review notes
 

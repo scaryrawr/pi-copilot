@@ -7,7 +7,7 @@
  * heuristics, in that order of preference.
  */
 
-import { type Api, type Model } from "@earendil-works/pi-ai";
+import { type Api, type Model, type ModelImageInputLimits } from "@earendil-works/pi-ai";
 
 import { ANTHROPIC_COMPAT, OPENAI_COMPLETIONS_COMPAT } from "./constants.js";
 import type { CopilotApiModel, ModelResponse } from "./types.js";
@@ -104,6 +104,11 @@ function supportsThinkingBudget(apiModel: CopilotApiModel): boolean {
   return budget !== undefined && budget > 0;
 }
 
+/** True iff Copilot advertises Anthropic adaptive thinking for the model. */
+function supportsAdaptiveThinking(apiModel: CopilotApiModel): boolean {
+  return apiModel.capabilities?.supports?.adaptive_thinking === true;
+}
+
 /**
  * Decide whether to expose the model as reasoning-capable.
  *
@@ -113,6 +118,9 @@ function supportsThinkingBudget(apiModel: CopilotApiModel): boolean {
  */
 export function inferReasoning(apiModel: CopilotApiModel, api: Api): boolean {
   if (supportsReasoningEffort(apiModel) || supportsThinkingBudget(apiModel)) return true;
+
+  // Adaptive thinking is reasoning even when no effort levels are advertised.
+  if (supportsAdaptiveThinking(apiModel)) return true;
 
   if (apiModel.capabilities?.supports === undefined) {
     return api === "anthropic-messages" || api === "openai-responses";
@@ -131,6 +139,64 @@ export function inferInput(apiModel: CopilotApiModel): ("text" | "image")[] {
 
   // Unknown capability — keep the prior id-based default.
   return apiModel.id.startsWith("grok-code-") ? ["text"] : ["text", "image"];
+}
+
+/**
+ * Project Copilot's vision limits onto pi's cache-safe image input limits.
+ *
+ * Copilot reports per-message image counts and a per-image byte ceiling; pi
+ * uses those to resize images before they enter conversation history.
+ * Returns `undefined` when Copilot publishes no vision limits.
+ */
+export function inferInputLimits(
+  apiModel: CopilotApiModel,
+  input: readonly ("text" | "image")[],
+): Model<Api>["inputLimits"] | undefined {
+  if (!input.includes("image")) return undefined;
+
+  const vision = apiModel.capabilities?.limits?.vision;
+
+  if (vision === undefined) return undefined;
+
+  const maxBytes = positiveNumber(vision.max_prompt_image_size, 0);
+  const maxPerMessage = positiveNumber(vision.max_prompt_images, 0);
+
+  const images: ModelImageInputLimits = {};
+
+  if (maxBytes > 0) images.resize = { maxBytes };
+
+  if (maxPerMessage > 0) images.maxPerMessage = maxPerMessage;
+
+  return Object.keys(images).length > 0 ? { images } : undefined;
+}
+
+/**
+ * Derive pi's per-million-token cost from Copilot's billing block.
+ *
+ * Copilot reports `token_prices.default` in **cents** per million tokens, so
+ * we divide by 100. Models that bill by premium request report all zeros, and
+ * missing prices fall back to `undefined` so the caller can keep its own
+ * default. Copilot's payload carries no long-context tier information, so the
+ * derived cost never includes `tiers`.
+ */
+export function inferCost(apiModel: CopilotApiModel): Model<Api>["cost"] | undefined {
+  const prices = apiModel.billing?.token_prices?.default;
+
+  if (prices === undefined) return undefined;
+
+  const cost: Model<Api>["cost"] = {
+    input: nonNegativeNumber(prices.input_price) / 100,
+    output: nonNegativeNumber(prices.output_price) / 100,
+    cacheRead: nonNegativeNumber(prices.cache_price) / 100,
+    cacheWrite: nonNegativeNumber(prices.cache_write_price) / 100,
+  };
+
+  return cost;
+}
+
+/** Finite non-negative number, else `0`. */
+function nonNegativeNumber(value: number | undefined): number {
+  return value !== undefined && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
 /** Compat flags pi needs to dial back features unsupported on Copilot. */

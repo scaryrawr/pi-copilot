@@ -43,24 +43,31 @@ export default async function (pi: CopilotExtensionApi) {
     accessToken: string,
     enterpriseDomain?: string,
     options?: { force?: boolean; signal?: AbortSignal },
-  ): Promise<void> {
-    if (await state.refresh(accessToken, enterpriseDomain, options)) {
-      pi.registerProvider("github-copilot", providerConfig);
-    }
+  ): Promise<boolean> {
+    return state.refresh(accessToken, enterpriseDomain, options);
   }
 
+  // pi publishes whatever this hook returns, so it must never yield an empty
+  // list: that would delete every Copilot model until the next refresh.
+  // Without OAuth credentials we keep the last known (curated) projection.
   providerConfig.refreshModels = async (context) => {
     const credentials = context.credential;
 
-    if (credentials?.type !== "oauth") return providerConfig.models ?? [];
+    if (credentials?.type !== "oauth") {
+      await state.reproject();
+
+      return providerConfig.models ?? [];
+    }
+
+    const enterpriseDomain = getEnterpriseDomain(credentials);
 
     if (context.allowNetwork) {
-      await refreshModels(credentials.access, getEnterpriseDomain(credentials), {
+      await refreshModels(credentials.access, enterpriseDomain, {
         signal: context.signal,
         force: context.force === true,
       });
     } else {
-      await state.reproject(credentials.access, getEnterpriseDomain(credentials));
+      await state.reproject(credentials.access, enterpriseDomain);
     }
 
     return providerConfig.models ?? [];
@@ -79,7 +86,12 @@ export default async function (pi: CopilotExtensionApi) {
     const storedCredentials = await loadStoredCopilotCredentials();
     const enterpriseDomain = storedCredentials ? getEnterpriseDomain(storedCredentials) : undefined;
     const signal = ctx.signal;
-    await refreshModels(accessToken, enterpriseDomain, signal ? { signal } : undefined);
+
+    // Outside pi's refresh lifecycle, so re-registering here is the only way to
+    // publish a payload discovered after startup.
+    if (await refreshModels(accessToken, enterpriseDomain, signal ? { signal } : undefined)) {
+      pi.registerProvider("github-copilot", providerConfig);
+    }
   });
 
   pi.registerProvider("github-copilot", providerConfig);
